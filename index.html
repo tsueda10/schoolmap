@@ -9,6 +9,10 @@
 body{margin:0;font:16px system-ui,sans-serif;color:#172d44;background:#f1f6fc;display:flex;flex-direction:column;min-height:100vh}
 header{padding:1rem 1.25rem}h1{margin:0 0 .6rem;font-size:1.4rem}p{margin:.5rem 0 0}
 .controls{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center}button,input{font:inherit}button{padding:.3rem .65rem;cursor:pointer}
+#types{margin:.65rem 0 0;border:1px solid #b7cadc;border-radius:6px}
+#type-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.35rem .8rem;margin-top:.5rem}
+.type-option{display:flex;align-items:center;gap:.35rem;cursor:pointer}
+.swatch{width:.8rem;height:.8rem;border-radius:50%;flex:none;border:1px solid #53657b}
 #map{flex:1;min-height:55vh;background:#e0eaf1}.popup p{margin:.35rem 0 0}
 </style>
 </head>
@@ -17,8 +21,14 @@ header{padding:1rem 1.25rem}h1{margin:0 0 .6rem;font-size:1.4rem}p{margin:.5rem 
 <h1>東京都の学校・教育施設マップ</h1>
 <div class="controls">
 <label>GeoJSONを選択 <input id="file" type="file" accept=".geojson,.json,application/geo+json"></label>
-<button id="all" type="button" disabled>全地点を表示</button>
+<button id="all" type="button" disabled>表示中の地点に合わせる</button>
 </div>
+<fieldset id="types" hidden>
+<legend>表示する学校種別</legend>
+<button id="select-all" type="button">すべて選択</button>
+<button id="clear-all" type="button">すべて解除</button>
+<div id="type-options"></div>
+</fieldset>
 <p id="basemap-note" hidden>OpenStreetMapで表示するには、このHTMLをローカルサーバー経由で開いてください。</p>
 <p id="status" role="status">地図を準備しています…</p>
 </header>
@@ -54,7 +64,57 @@ header{padding:1rem 1.25rem}h1{margin:0 0 .6rem;font-size:1.4rem}p{margin:.5rem 
   basemap.on('tileerror', () => {
     status.title = '背景地図の一部を取得できませんでした。';
   });
-  let layer;
+  const schoolTypes = new Map([
+    ['16001', ['小学校', '#1264c4']],
+    ['16002', ['中学校', '#008450']],
+    ['16003', ['中等教育学校', '#925200']],
+    ['16004', ['高等学校', '#ce421c']],
+    ['16005', ['高等専門学校', '#59422d']],
+    ['16006', ['短期大学', '#b22276']],
+    ['16007', ['大学', '#702bc5']],
+    ['16011', ['幼稚園', '#d89400']],
+    ['16012', ['特別支援学校', '#3e526b']],
+    ['16013', ['幼保連携型認定こども園', '#80a600']],
+    ['16014', ['義務教育学校', '#006d86']],
+    ['16015', ['各種学校', '#8e1c35']],
+    ['16016', ['専修学校', '#ba55ad']]
+  ]);
+  const typeOptions = document.querySelector('#type-options');
+  const visiblePoints = L.featureGroup().addTo(map);
+  let groups = new Map();
+
+  function typeCode(feature) {
+    return String(feature.properties?.P29_003 ?? '');
+  }
+
+  function typeInfo(code) {
+    return schoolTypes.get(code) ?? [code ? `未登録の種別（${code}）` : '種別不明', '#666666'];
+  }
+
+  function updateVisibility() {
+    let count = 0;
+    for (const {checkbox, points, group} of groups.values()) {
+      if (checkbox.checked) {
+        if (!visiblePoints.hasLayer(group)) visiblePoints.addLayer(group);
+        count += points.length;
+      } else {
+        visiblePoints.removeLayer(group);
+      }
+    }
+    allButton.disabled = count === 0;
+    status.textContent = count
+      ? `${count.toLocaleString('ja-JP')}地点を表示中。点を押すと施設名・種別・所在地が表示されます。`
+      : '表示する学校種別を選択してください。';
+  }
+
+  function selectAllTypes(checked) {
+    for (const {checkbox} of groups.values()) checkbox.checked = checked;
+    updateVisibility();
+  }
+
+  typeOptions.addEventListener('change', updateVisibility);
+  document.querySelector('#select-all').addEventListener('click', () => selectAllTypes(true));
+  document.querySelector('#clear-all').addEventListener('click', () => selectAllTypes(false));
   let loadId = 0;
 
   function render(data) {
@@ -63,8 +123,8 @@ header{padding:1rem 1.25rem}h1{margin:0 0 .6rem;font-size:1.4rem}p{margin:.5rem 
     }
     const nextLayer = L.geoJSON(data, {
       filter: feature => feature.geometry?.type === 'Point',
-      pointToLayer: (_, latlng) => L.circleMarker(latlng, {
-        radius: 5, color: '#fff', weight: 1, fillColor: '#1468ba', fillOpacity: 0.88
+      pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+        radius: 5, color: '#fff', weight: 1, fillColor: typeInfo(typeCode(feature))[1], fillOpacity: 0.88
       }),
       onEachFeature: (feature, point) => {
         point.bindPopup(() => {
@@ -75,21 +135,47 @@ header{padding:1rem 1.25rem}h1{margin:0 0 .6rem;font-size:1.4rem}p{margin:.5rem 
           name.textContent = [props.P29_004 || '名称未登録', props.P29_009].filter(Boolean).join(' ');
           const address = document.createElement('p');
           address.textContent = props.P29_005 || '所在地未登録';
-          content.append(name, address);
+          const category = document.createElement('p');
+          category.textContent = '種別：' + typeInfo(typeCode(feature))[0];
+          content.append(name, category, address);
           return content;
         });
       }
     });
-    const count = nextLayer.getLayers().length;
-    if (!count) throw new Error('表示できる地点がありません。');
-    layer?.remove();
-    layer = nextLayer.addTo(map);
-    allButton.disabled = false;
-    status.textContent = `${count.toLocaleString('ja-JP')}地点を表示中。点を押すと施設名と所在地が表示されます。`;
+    const nextGroups = new Map();
+    nextLayer.eachLayer(point => {
+      const code = typeCode(point.feature);
+      if (!nextGroups.has(code)) nextGroups.set(code, {points: []});
+      nextGroups.get(code).points.push(point);
+    });
+    if (!nextGroups.size) throw new Error('表示できる地点がありません。');
+
+    visiblePoints.clearLayers();
+    groups = nextGroups;
+    typeOptions.replaceChildren();
+    for (const code of [...groups.keys()].sort()) {
+      const entry = groups.get(code);
+      const [name, color] = typeInfo(code);
+      const label = document.createElement('label');
+      label.className = 'type-option';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = true;
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+      swatch.style.backgroundColor = color;
+      swatch.setAttribute('aria-hidden', 'true');
+      label.append(checkbox, swatch, `${name}（${entry.points.length.toLocaleString('ja-JP')}）`);
+      typeOptions.append(label);
+      entry.checkbox = checkbox;
+      entry.group = L.featureGroup(entry.points);
+    }
+    document.querySelector('#types').hidden = false;
+    updateVisibility();
   }
 
   allButton.addEventListener('click', () => {
-    map.fitBounds(layer.getBounds(), {padding: [24, 24], maxZoom: 15});
+    map.fitBounds(visiblePoints.getBounds(), {padding: [24, 24], maxZoom: 15});
   });
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0];
