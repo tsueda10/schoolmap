@@ -2,209 +2,447 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>東京都の学校・教育施設マップ</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>本棚ノート｜蔵書管理</title>
 <style>
-body{margin:0;font:16px system-ui,sans-serif;color:#172d44;background:#f1f6fc;display:flex;flex-direction:column;min-height:100vh}
-header{padding:1rem 1.25rem}h1{margin:0 0 .6rem;font-size:1.4rem}p{margin:.5rem 0 0}
-.controls{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center}button,input{font:inherit}button{padding:.3rem .65rem;cursor:pointer}
-#types{margin:.65rem 0 0;border:1px solid #b7cadc;border-radius:6px}
-#type-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.35rem .8rem;margin-top:.5rem}
-.type-option{display:flex;align-items:center;gap:.35rem;cursor:pointer}
-.swatch{width:.8rem;height:.8rem;border-radius:50%;flex:none;border:1px solid #53657b}
-#map{flex:1;min-height:55vh;background:#e0eaf1}.popup p{margin:.35rem 0 0}
+body{margin:0;background:#f2f6f4;color:#172e27;font-family:system-ui,sans-serif}
+.camera-preview{position:relative;width:100%;max-width:260px;height:128px;overflow:hidden}
+#viewport{position:absolute;inset:0}
+#viewport video{
+  position:absolute;inset:0;display:block;
+  width:100%!important;height:100%!important;
+  max-width:100%;max-height:100%;
+  object-fit:contain!important;object-position:center;
+}
+#viewport canvas{display:none!important}
+[hidden]{display:none!important}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js" defer></script>
 </head>
 <body>
-<header>
-<h1>東京都の学校・教育施設マップ</h1>
-<div class="controls">
-<label>GeoJSONを選択 <input id="file" type="file" accept=".geojson,.json,application/geo+json"></label>
-<button id="all" type="button" disabled>表示中の地点に合わせる</button>
-</div>
-<fieldset id="types" hidden>
-<legend>表示する学校種別</legend>
-<button id="select-all" type="button">すべて選択</button>
-<button id="clear-all" type="button">すべて解除</button>
-<div id="type-options"></div>
-</fieldset>
-<p id="basemap-note" hidden>OpenStreetMapで表示するには、このHTMLをローカルサーバー経由で開いてください。</p>
-<p id="status" role="status">地図を準備しています…</p>
+<main class="mx-auto max-w-4xl space-y-5 px-4 py-8 sm:px-8 sm:py-12">
+<header class="rounded-3xl bg-emerald-950 px-6 py-8 text-white sm:px-9">
+<p class="text-xs font-bold tracking-[.26em] text-emerald-200">MY LIBRARY</p>
+<h1 class="mt-2 text-3xl font-black sm:text-4xl">本棚ノート</h1>
+<p class="mt-2 text-sm text-emerald-100">本のバーコードから、自分だけの蔵書リストを。</p>
 </header>
-<div id="map" aria-label="学校・教育施設の地図"></div>
-<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<section aria-labelledby="scan-heading" class="rounded-3xl border border-emerald-100 bg-white p-5 sm:p-7">
+<div class="grid gap-5 sm:grid-cols-[1fr_220px] sm:items-center">
+<div>
+<h2 id="scan-heading" class="text-xl font-bold">書籍を登録</h2>
+<p class="mt-1 text-sm text-slate-600">裏表紙にバーコードが2段ある本は、978または979から始まる方を映してください。</p>
+<div class="mt-4 flex flex-wrap gap-2">
+<button id="start" class="rounded-xl bg-emerald-800 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-900 disabled:opacity-40">カメラを起動</button>
+<button id="stop" disabled class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-40">カメラをオフ</button>
+</div>
+</div>
+<div class="camera-preview rounded-2xl bg-slate-900 text-white">
+<div id="viewport"></div>
+<div id="camera-label" class="pointer-events-none absolute inset-0 grid place-items-center text-xs text-slate-200">カメラ停止中</div>
+<div id="guide" hidden class="pointer-events-none absolute inset-x-[15%] top-[26%] h-[48%] rounded border border-emerald-300/80"></div>
+</div>
+</div>
+<form id="manual" class="mt-5 border-t border-slate-200 pt-4">
+<label for="isbn" class="text-sm font-semibold">ISBNを手入力</label>
+<div class="mt-1 flex flex-wrap gap-2">
+<input id="isbn" required inputmode="numeric" maxlength="30" placeholder="9784101010014" class="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm">
+<button id="lookup" class="rounded-xl bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-950 hover:bg-emerald-100 disabled:opacity-40">検索して登録</button>
+</div>
+</form>
+<p id="status" role="status" class="mt-3 min-h-5 text-sm text-emerald-900"></p>
+</section>
+
+<section aria-labelledby="list-heading" class="rounded-3xl border border-emerald-100 bg-white p-5 sm:p-7">
+<div class="flex items-center justify-between gap-3">
+<div><h2 id="list-heading" class="text-xl font-bold">蔵書リスト</h2><p class="mt-1 text-xs text-slate-600">新しく登録した順</p></div>
+<span id="count" class="rounded-full bg-emerald-50 px-3 py-1 text-sm font-bold text-emerald-900"></span>
+</div>
+<div class="mt-4 flex flex-wrap gap-2">
+<button id="export" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold hover:bg-slate-50">エクスポート</button>
+<button id="import" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-40">インポート</button>
+<input id="csv-file" type="file" accept=".csv,text/csv" hidden>
+</div>
+<p class="mt-2 text-xs text-slate-600">CSV（UTF-8）で蔵書をバックアップ・復元できます。</p>
+<p id="csv-status" role="status" class="mt-2 text-sm text-emerald-900"></p>
+<p id="empty" class="mt-4 rounded-2xl border border-dashed border-slate-300 p-5 text-center text-sm text-slate-600">まだ本が登録されていません。</p>
+<ul id="books" class="mt-3 divide-y divide-slate-200"></ul>
+</section>
+<p class="text-center text-xs leading-6 text-slate-600">書誌情報は openBD・Google Books で検索します。登録内容はこのブラウザに保存されます。</p>
+</main>
 <script>
-(async () => {
-  const filename = 'P29-23_13.geojson';
-  const status = document.querySelector('#status');
-  const fileInput = document.querySelector('#file');
-  const allButton = document.querySelector('#all');
-  if (!window.L) {
-    status.textContent = '地図ライブラリを読み込めません。インターネット接続を確認してください。';
-    return;
-  }
+const byId = id => document.getElementById(id);
+const storageKey = 'bookshelf-note.books.v1';
+let books = [];
+let camera = 'off';
+let lookingUp = false;
+let lastScan = { isbn: '', at: 0 };
 
-  const map = L.map('map', {preferCanvas: true}).setView([35.70, 139.53], 10);
-  const directOpen = location.protocol === 'file:';
-  document.querySelector('#basemap-note').hidden = !directOpen;
-  const gsi = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
-    maxNativeZoom: 18,
-    maxZoom: 19,
-    attribution: '背景地図：<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル（標準地図）</a>'
-  });
-  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  });
-  const basemap = (directOpen ? gsi : osm).addTo(map);
-  if (!directOpen) {
-    L.control.layers({'OpenStreetMap': osm, '地理院地図': gsi}, {}, {collapsed: false}).addTo(map);
-  }
-  basemap.on('tileerror', () => {
-    status.title = '背景地図の一部を取得できませんでした。';
-  });
-  const schoolTypes = new Map([
-    ['16001', ['小学校', '#1264c4']],
-    ['16002', ['中学校', '#008450']],
-    ['16003', ['中等教育学校', '#925200']],
-    ['16004', ['高等学校', '#ce421c']],
-    ['16005', ['高等専門学校', '#59422d']],
-    ['16006', ['短期大学', '#b22276']],
-    ['16007', ['大学', '#702bc5']],
-    ['16011', ['幼稚園', '#d89400']],
-    ['16012', ['特別支援学校', '#3e526b']],
-    ['16013', ['幼保連携型認定こども園', '#80a600']],
-    ['16014', ['義務教育学校', '#006d86']],
-    ['16015', ['各種学校', '#8e1c35']],
-    ['16016', ['専修学校', '#ba55ad']]
-  ]);
-  const typeOptions = document.querySelector('#type-options');
-  const visiblePoints = L.featureGroup().addTo(map);
-  let groups = new Map();
+function message(text) {
+  byId('status').textContent = text;
+}
 
-  function typeCode(feature) {
-    return String(feature.properties?.P29_003 ?? '');
-  }
+function normalizeISBN(value) {
+  const digits = String(value ?? '').normalize('NFKC').replace(/[\s‐‑–—−-]/g, '');
+  if (!/^97[89]\d{10}$/.test(digits)) return '';
+  const sum = [...digits].reduce((total, digit, i) => total + Number(digit) * (i % 2 ? 3 : 1), 0);
+  return sum % 10 === 0 ? digits : '';
+}
 
-  function typeInfo(code) {
-    return schoolTypes.get(code) ?? [code ? `未登録の種別（${code}）` : '種別不明', '#666666'];
-  }
+function readBooks() {
+  const raw = localStorage.getItem(storageKey);
+  if (raw === null) return [];
+  const saved = JSON.parse(raw);
+  if (!Array.isArray(saved)) throw new Error('Invalid saved books');
+  return saved;
+}
 
-  function updateVisibility() {
-    let count = 0;
-    for (const {checkbox, points, group} of groups.values()) {
-      if (checkbox.checked) {
-        if (!visiblePoints.hasLayer(group)) visiblePoints.addLayer(group);
-        count += points.length;
-      } else {
-        visiblePoints.removeLayer(group);
-      }
-    }
-    allButton.disabled = count === 0;
-    status.textContent = count
-      ? `${count.toLocaleString('ja-JP')}地点を表示中。点を押すと施設名・種別・所在地が表示されます。`
-      : '表示する学校種別を選択してください。';
-  }
+const dateFormat = new Intl.DateTimeFormat('ja-JP', {
+  dateStyle: 'medium', timeStyle: 'medium'
+});
 
-  function selectAllTypes(checked) {
-    for (const {checkbox} of groups.values()) checkbox.checked = checked;
-    updateVisibility();
-  }
-
-  typeOptions.addEventListener('change', updateVisibility);
-  document.querySelector('#select-all').addEventListener('click', () => selectAllTypes(true));
-  document.querySelector('#clear-all').addEventListener('click', () => selectAllTypes(false));
-  let loadId = 0;
-
-  function render(data) {
-    if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
-      throw new Error('FeatureCollection が必要です。');
-    }
-    const nextLayer = L.geoJSON(data, {
-      filter: feature => feature.geometry?.type === 'Point',
-      pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-        radius: 5, color: '#fff', weight: 1, fillColor: typeInfo(typeCode(feature))[1], fillOpacity: 0.88
-      }),
-      onEachFeature: (feature, point) => {
-        point.bindPopup(() => {
-          const props = feature.properties ?? {};
-          const content = document.createElement('div');
-          content.className = 'popup';
-          const name = document.createElement('strong');
-          name.textContent = [props.P29_004 || '名称未登録', props.P29_009].filter(Boolean).join(' ');
-          const address = document.createElement('p');
-          address.textContent = props.P29_005 || '所在地未登録';
-          const category = document.createElement('p');
-          category.textContent = '種別：' + typeInfo(typeCode(feature))[0];
-          content.append(name, category, address);
-          return content;
-        });
+function render() {
+  byId('count').textContent = books.length + ' 冊';
+  byId('empty').hidden = books.length > 0;
+  const list = byId('books');
+  list.replaceChildren();
+  for (const book of books) {
+    const row = document.createElement('li');
+    row.className = 'flex items-start justify-between gap-3 py-4';
+    const details = document.createElement('div');
+    details.className = 'min-w-0 break-words';
+    const title = document.createElement('h3');
+    title.className = 'font-bold';
+    title.textContent = book.title;
+    const author = document.createElement('p');
+    author.className = 'mt-1 text-sm text-slate-700';
+    author.textContent = book.author;
+    const isbn = document.createElement('p');
+    isbn.className = 'mt-1 font-mono text-xs text-slate-600';
+    isbn.textContent = 'ISBN ' + book.isbn;
+    const date = document.createElement('p');
+    date.className = 'mt-1 text-xs text-slate-600';
+    const timestamp = Date.parse(book.registeredAt);
+    date.textContent = '登録日時：' + (Number.isFinite(timestamp) ? dateFormat.format(timestamp) : '記録なし');
+    details.append(title, author, isbn, date);
+    const remove = document.createElement('button');
+    remove.className = 'shrink-0 rounded-lg px-3 py-2 text-sm font-semibold text-rose-800 hover:bg-rose-50';
+    remove.textContent = '削除';
+    remove.setAttribute('aria-label', book.title + 'を削除');
+    remove.addEventListener('click', () => {
+      if (!confirm('「' + book.title + '」を削除しますか？')) return;
+      try {
+        save(readBooks().filter(item => item.isbn !== book.isbn));
+        message('蔵書リストから削除しました。');
+      } catch {
+        message('削除を保存できませんでした。ブラウザの保存設定を確認してください。');
       }
     });
-    const nextGroups = new Map();
-    nextLayer.eachLayer(point => {
-      const code = typeCode(point.feature);
-      if (!nextGroups.has(code)) nextGroups.set(code, {points: []});
-      nextGroups.get(code).points.push(point);
-    });
-    if (!nextGroups.size) throw new Error('表示できる地点がありません。');
-
-    visiblePoints.clearLayers();
-    groups = nextGroups;
-    typeOptions.replaceChildren();
-    for (const code of [...groups.keys()].sort()) {
-      const entry = groups.get(code);
-      const [name, color] = typeInfo(code);
-      const label = document.createElement('label');
-      label.className = 'type-option';
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = true;
-      const swatch = document.createElement('span');
-      swatch.className = 'swatch';
-      swatch.style.backgroundColor = color;
-      swatch.setAttribute('aria-hidden', 'true');
-      label.append(checkbox, swatch, `${name}（${entry.points.length.toLocaleString('ja-JP')}）`);
-      typeOptions.append(label);
-      entry.checkbox = checkbox;
-      entry.group = L.featureGroup(entry.points);
-    }
-    document.querySelector('#types').hidden = false;
-    updateVisibility();
+    row.append(details, remove);
+    list.append(row);
   }
+}
 
-  allButton.addEventListener('click', () => {
-    map.fitBounds(visiblePoints.getBounds(), {padding: [24, 24], maxZoom: 15});
-  });
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files[0];
-    if (!file) return;
-    const requestId = ++loadId;
-    try {
-      const data = JSON.parse(await file.text());
-      if (requestId === loadId) render(data);
-    } catch {
-      if (requestId === loadId) status.textContent = '地点を読み込めませんでした。GeoJSONファイルを確認してください。';
-    } finally {
-      if (requestId === loadId) fileInput.value = '';
+function save(next) {
+  localStorage.setItem(storageKey, JSON.stringify(next));
+  books = next;
+  render();
+}
+
+async function fetchJSON(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error('Lookup HTTP ' + response.status);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function lookupBook(isbn) {
+  let candidate;
+  let failed = false;
+  try {
+    const data = await fetchJSON('https://api.openbd.jp/v1/get?isbn=' + isbn);
+    const summary = data?.[0]?.summary;
+    if (summary?.isbn === isbn && summary.title?.trim()) {
+      candidate = { isbn, title: summary.title.trim(), author: summary.author?.trim() };
+      if (candidate.author) return candidate;
     }
-  });
-
-  const filePrompt = `上の「GeoJSONを選択」から ${filename} を選んでください。`;
-  if (location.protocol === 'file:') {
-    status.textContent = filePrompt;
-    return;
+  } catch {
+    failed = true;
   }
   try {
-    const response = await fetch('./' + filename);
-    if (!response.ok) throw new Error('GeoJSON fetch failed');
-    const data = await response.json();
-    if (loadId === 0) render(data);
+    const data = await fetchJSON('https://www.googleapis.com/books/v1/volumes?q=isbn:' + isbn);
+    const info = data.items?.map(item => item.volumeInfo).find(item =>
+      item?.title?.trim() && item.industryIdentifiers?.some(id => id.type === 'ISBN_13' && id.identifier === isbn)
+    );
+    if (info) return { isbn, title: candidate?.title || info.title.trim(), author: info.authors?.join('、') || '著者情報なし' };
   } catch {
-    if (loadId === 0) status.textContent = '同じフォルダから自動で読み込めませんでした。' + filePrompt;
+    failed = true;
   }
-})();
+  if (candidate) return { ...candidate, author: '著者情報なし' };
+  if (failed) throw new Error('Lookup unavailable');
+  return null;
+}
+
+async function register(isbn) {
+  if (lookingUp) return;
+  const duplicate = () => books.some(book => book.isbn === isbn);
+  if (duplicate()) {
+    message('ISBN ' + isbn + ' は登録済みです。');
+    return;
+  }
+  lookingUp = true;
+  byId('lookup').disabled = true;
+  message('ISBN ' + isbn + ' の書誌情報を検索中…');
+  try {
+    const book = await lookupBook(isbn);
+    if (!book) {
+      message('ISBN ' + isbn + ' の書誌情報が見つかりませんでした。');
+      return;
+    }
+    try {
+      books = readBooks();
+      if (duplicate()) {
+        render();
+        message('ISBN ' + isbn + ' は登録済みです。');
+        return;
+      }
+      save([{ ...book, registeredAt: new Date().toISOString() }, ...books]);
+    } catch {
+      message('書籍を保存できませんでした。ブラウザの保存設定を確認してください。');
+      return;
+    }
+    message('「' + book.title + '」を登録しました。');
+    if (normalizeISBN(byId('isbn').value) === isbn) byId('isbn').value = '';
+  } catch {
+    message('書誌情報を取得できませんでした。通信状況を確認し、再度お試しください。');
+  } finally {
+    lookingUp = false;
+    byId('lookup').disabled = false;
+  }
+}
+
+function onDetected(result) {
+  if (camera !== 'on' || lookingUp) return;
+  const isbn = normalizeISBN(result?.codeResult?.code);
+  if (!isbn || (isbn === lastScan.isbn && Date.now() - lastScan.at < 4000)) return;
+  lastScan = { isbn, at: Date.now() };
+  void register(isbn);
+}
+
+function cameraUI(state) {
+  camera = state;
+  byId('start').disabled = state !== 'off';
+  byId('stop').disabled = state === 'off';
+  byId('guide').hidden = state !== 'on';
+  byId('camera-label').hidden = state === 'on';
+  byId('camera-label').textContent = state === 'starting' ? 'カメラを準備中…' : 'カメラ停止中';
+}
+
+function releaseCamera() {
+  const scanner = window.Quagga;
+  scanner?.offDetected(onDetected);
+  try { scanner?.stop(); } catch { /* Initialization may be incomplete. */ }
+  const viewport = byId('viewport');
+  for (const video of viewport.querySelectorAll('video')) {
+    video.srcObject?.getTracks().forEach(track => track.stop());
+  }
+  viewport.replaceChildren();
+}
+
+byId('start').addEventListener('click', async () => {
+  const scanner = window.Quagga;
+  if (!scanner) return message('読み取り機能を読み込めませんでした。通信状況を確認して再読み込みしてください。');
+  if (!navigator.mediaDevices?.getUserMedia) return message('カメラの利用には HTTPS または localhost が必要です。ISBNは手入力でも登録できます。');
+  cameraUI('starting');
+  message('カメラのアクセスを許可してください。');
+  try {
+    const viewport = byId('viewport');
+    const video = document.createElement('video');
+    video.playsInline = true;
+    video.muted = true;
+    viewport.append(video);
+    await new Promise((resolve, reject) => scanner.init({
+      inputStream: { type: 'LiveStream', target: viewport, constraints: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } } },
+      decoder: { readers: ['ean_reader'] },
+      locate: true,
+      numOfWorkers: 0,
+      frequency: 8
+    }, error => error ? reject(error) : resolve()));
+    if (camera === 'cancelling') {
+      releaseCamera();
+      cameraUI('off');
+      return;
+    }
+    lastScan = { isbn: '', at: 0 };
+    scanner.onDetected(onDetected);
+    scanner.start();
+    cameraUI('on');
+    message('ISBNのバーコードを枠内に映してください。');
+  } catch (error) {
+    const cancelled = camera === 'cancelling';
+    releaseCamera();
+    cameraUI('off');
+    if (!cancelled) message(error.name === 'NotAllowedError'
+      ? 'カメラへのアクセスが許可されていません。ブラウザのカメラ設定を確認してください。'
+      : 'カメラを起動できませんでした。接続を確認するか、ISBNを手入力してください。');
+  }
+});
+
+function stopCamera() {
+  if (camera === 'starting') {
+    cameraUI('cancelling');
+    byId('stop').disabled = true;
+    message('カメラの起動を取り消しました。許可画面が表示されている場合は閉じてください。');
+  } else if (camera === 'on') {
+    releaseCamera();
+    cameraUI('off');
+    message('カメラをオフにしました。');
+  }
+}
+
+byId('stop').addEventListener('click', stopCamera);
+window.addEventListener('pagehide', stopCamera);
+byId('manual').addEventListener('submit', event => {
+  event.preventDefault();
+  const isbn = normalizeISBN(byId('isbn').value);
+  if (!isbn) return message('978または979から始まる、有効な13桁のISBNを入力してください。');
+  void register(isbn);
+});
+const csvHeaders = ['ISBN', '書籍タイトル', '著者名', '登録日時'];
+
+function csvCell(value) {
+  let field = String(value ?? '');
+  // Protect text fields when the CSV is opened in spreadsheet software.
+  if (/^(?:'|\s*[=+@-]|[\t\r\n])/.test(field)) field = "'" + field;
+  return '"' + field.replace(/"/g, '""') + '"';
+}
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  let closed = false;
+  text = text.replace(/^\uFEFF/, '');
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (ch === '"') {
+        quoted = false;
+        closed = true;
+      } else {
+        field += ch;
+      }
+    } else if (ch === ',' || ch === '\n' || ch === '\r') {
+      row.push(field);
+      field = '';
+      closed = false;
+      if (ch !== ',') {
+        rows.push(row);
+        row = [];
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+      }
+    } else if (ch === '"' && !closed && field === '') {
+      quoted = true;
+    } else {
+      if (closed || ch === '"') throw new Error('CSVの引用符の形式が正しくありません。');
+      field += ch;
+    }
+  }
+  if (quoted) throw new Error('CSVの引用符が閉じていません。');
+  if (row.length || field || closed) rows.push([...row, field]);
+  return rows.filter(record => record.some(value => value.trim()));
+}
+
+function importCSV(text, existing) {
+  const [header, ...rows] = parseCSV(text);
+  if (!header || ![3, 4].includes(header.length) ||
+      !header.every((name, i) => name.trim() === csvHeaders[i])) {
+    throw new Error('列は「ISBN、書籍タイトル、著者名、登録日時」の順にしてください。登録日時の列は省略できます。');
+  }
+  const seen = new Set(existing.map(book => book.isbn));
+  const added = [];
+  let duplicates = 0;
+  for (const [index, row] of rows.entries()) {
+    const [rawISBN, rawTitle, rawAuthor, date = ''] = row;
+    const isbn = normalizeISBN(rawISBN);
+    const title = rawTitle?.replace(/^'(?='|\s*[=+@-]|[\t\r\n])/, '');
+    const author = rawAuthor?.replace(/^'(?='|\s*[=+@-]|[\t\r\n])/, '');
+    const timestamp = date.trim() ? Date.parse(date) : null;
+    if (row.length !== header.length || !isbn || !title?.trim() ||
+        (timestamp !== null && !Number.isFinite(timestamp))) {
+      throw new Error('データの ' + (index + 1) + ' 件目の列数、ISBN、タイトル、登録日時を確認してください。');
+    }
+    if (seen.has(isbn)) {
+      duplicates++;
+      continue;
+    }
+    seen.add(isbn);
+    added.push({ isbn, title, author: author.trim() ? author : '著者情報なし',
+      registeredAt: timestamp === null ? null : new Date(timestamp).toISOString() });
+  }
+  const order = book => {
+    const timestamp = Date.parse(book.registeredAt);
+    return Number.isFinite(timestamp) ? timestamp : -Infinity;
+  };
+  return { added: added.length, duplicates,
+    books: [...existing, ...added].sort((a, b) => order(b) - order(a)) };
+}
+
+const csvStatus = byId('csv-status');
+const csvInput = byId('csv-file');
+byId('export').addEventListener('click', () => {
+  try {
+    const current = readBooks();
+    const rows = [csvHeaders, ...current.map(book => [book.isbn, book.title, book.author, book.registeredAt])];
+    const csv = rows.map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+    const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'bookshelf.csv';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    csvStatus.textContent = current.length + '冊をCSVにエクスポートしました。';
+  } catch {
+    csvStatus.textContent = 'CSVをエクスポートできませんでした。';
+  }
+});
+
+byId('import').addEventListener('click', () => csvInput.click());
+csvInput.addEventListener('change', async () => {
+  const file = csvInput.files[0];
+  csvInput.value = '';
+  if (!file) return;
+  byId('import').disabled = true;
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+    const result = importCSV(text, readBooks());
+    if (result.added) save(result.books);
+    csvStatus.textContent = result.added + '冊を追加しました。重複でスキップした書籍は' + result.duplicates + '冊です。';
+  } catch (error) {
+    csvStatus.textContent = 'CSVを取り込めませんでした。UTF-8のCSVを使用してください。 ' + error.message;
+  } finally {
+    byId('import').disabled = false;
+  }
+});
+
+window.addEventListener('storage', event => {
+  if (event.key !== storageKey && event.key !== null) return;
+  try { books = readBooks(); render(); } catch { message('保存データを読み込めませんでした。'); }
+});
+try { books = readBooks(); } catch { message('保存データを読み込めませんでした。'); }
+render();
 </script>
 </body>
 </html>
